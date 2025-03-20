@@ -1,16 +1,12 @@
-import kotlin.coroutines.*
 import java.util.*
 import java.util.concurrent.Executors
-import kotlin.math.floor
 import kotlin.random.Random
 
 object SimulationConfig {
-    const val ISLAND_WIDTH = 10
-    const val ISLAND_HEIGHT = 10
-    const val SIMULATION_DURATION_MS = 10000L
+    const val ISLAND_WIDTH = 100
+    const val ISLAND_HEIGHT = 20
     const val TICK_INTERVAL_MS = 1000L
     const val INITIAL_PLANT_DENSITY = 0.3
-    const val STATISTICS_INTERVAL_MS = 5000L
 
     const val INITIAL_WOLF_COUNT = 5
     const val INITIAL_SNAKE_COUNT = 5
@@ -28,28 +24,27 @@ object SimulationConfig {
     const val INITIAL_DUCK_COUNT = 30
     const val INITIAL_CATERPILLAR_COUNT = 200
 
-    const val MAX_ANIMALS_PER_CELL = 100
     const val MAX_PLANTS_PER_CELL = 200
 
     var IS_SIMULATION_RUNNING = true
 
     val animalCharacteristics = mapOf(
-        "Волк" to AnimalCharacteristics(50.0, 30, 3.0, 8.0),
-        "Удав" to AnimalCharacteristics(15.0, 30, 1.0, 3.0),
-        "Лиса" to AnimalCharacteristics(8.0, 30, 2.0, 2.0),
-        "Медведь" to AnimalCharacteristics(500.0, 5, 2.0, 80.0),
-        "Орел" to AnimalCharacteristics(6.0, 20, 3.0, 1.0),
-        "Лошадь" to AnimalCharacteristics(400.0, 20, 4.0, 60.0),
-        "Олень" to AnimalCharacteristics(300.0, 20, 4.0, 50.0),
-        "Кролик" to AnimalCharacteristics(2.0, 150, 2.0, 0.45),
-        "Мышь" to AnimalCharacteristics(0.05, 500, 1.0, 0.01),
-        "Коза" to AnimalCharacteristics(60.0, 140, 3.0, 10.0),
-        "Овца" to AnimalCharacteristics(70.0, 140, 3.0, 15.0),
-        "Кабан" to AnimalCharacteristics(400.0, 50, 2.0, 50.0),
-        "Буйвол" to AnimalCharacteristics(700.0, 10, 3.0, 100.0),
-        "Утка" to AnimalCharacteristics(1.0, 200, 4.0, 0.15),
-        "Гусеница" to AnimalCharacteristics(0.01, 1000, 0.0, 0.0),
-        "Растения" to AnimalCharacteristics(1.0, 200, 0.0, 0.0)
+        "Волк" to AnimalCharacteristics(50.0, 30, 3.0, 8.0, 1),
+        "Удав" to AnimalCharacteristics(15.0, 30, 1.0, 3.0, 1),
+        "Лиса" to AnimalCharacteristics(8.0, 30, 2.0, 2.0, 1),
+        "Медведь" to AnimalCharacteristics(500.0, 5, 2.0, 80.0, 1),
+        "Орел" to AnimalCharacteristics(6.0, 20, 3.0, 1.0, 1),
+        "Лошадь" to AnimalCharacteristics(400.0, 20, 4.0, 60.0, 1),
+        "Олень" to AnimalCharacteristics(300.0, 20, 4.0, 50.0, 1),
+        "Кролик" to AnimalCharacteristics(2.0, 150, 2.0, 0.45, 2),
+        "Мышь" to AnimalCharacteristics(0.05, 500, 1.0, 0.01, 3),
+        "Коза" to AnimalCharacteristics(60.0, 140, 3.0, 10.0, 1),
+        "Овца" to AnimalCharacteristics(70.0, 140, 3.0, 15.0, 1),
+        "Кабан" to AnimalCharacteristics(400.0, 50, 2.0, 50.0, 1),
+        "Буйвол" to AnimalCharacteristics(700.0, 10, 3.0, 100.0, 1),
+        "Утка" to AnimalCharacteristics(1.0, 200, 4.0, 0.15, 2),
+        "Гусеница" to AnimalCharacteristics(0.01, 1000, 0.0, 0.0, 10),
+        "Растения" to AnimalCharacteristics(1.0, 200, 0.0, 0.0, 0)
     )
 
     val foodProbabilities = mapOf(
@@ -75,7 +70,8 @@ data class AnimalCharacteristics(
     val weight: Double,
     val maxCount: Int,
     val speed: Double,
-    val foodNeeded: Double
+    val foodNeeded: Double,
+    val offspringCount: Int // Количество детёнышей при размножении
 )
 
 interface Eatable {
@@ -97,9 +93,11 @@ abstract class Animal(
     open val maxCount: Int,
     open val speed: Double,
     open val foodNeeded: Double,
+    open val offspringCount: Int,
     open var isAlive: Boolean = true
 ) : IslandElement(weight), Eatable {
     var foodLevel: Double = foodNeeded / 2
+    var currentLocation: Location? = null
 
     override var weight: Double = weight
         get() = field
@@ -111,7 +109,12 @@ abstract class Animal(
 
     open fun die() {
         isAlive = false
-        println("$name died.")
+        val location = currentLocation
+        if (location != null) {
+            println("$name умер на координатах (${location.x}, ${location.y}).")
+        } else {
+            println("$name умер.")
+        }
     }
 
     override fun beEaten(): Boolean {
@@ -120,9 +123,8 @@ abstract class Animal(
     }
 
     override fun toString(): String {
-        return "$name (Weight: $weight, Food: $foodLevel)"
+        return "$name (Вес: $weight, Еда: $foodLevel)"
     }
-
 }
 
 abstract class Predator(
@@ -130,8 +132,9 @@ abstract class Predator(
     weight: Double,
     maxCount: Int,
     speed: Double,
-    foodNeeded: Double
-) : Animal(name, weight, maxCount, speed, foodNeeded) {
+    foodNeeded: Double,
+    offspringCount: Int
+) : Animal(name, weight, maxCount, speed, foodNeeded, offspringCount) {
 
     override fun eat(location: Location) {
         if (foodLevel < foodNeeded) {
@@ -147,41 +150,54 @@ abstract class Predator(
                         location.animals.remove(target)
                         foodLevel = foodNeeded
                         weight += target.weight * 0.1
-                        println("$name ate a ${target.name}.")
+                        println("$name съел ${target.name} на координатах (${location.x}, ${location.y}).")
                     }
                 } else {
                     foodLevel -= foodNeeded * 0.25
-                    println("$name couldn't find food.")
+                    println("$name не смог найти еду на координатах (${location.x}, ${location.y}).")
                 }
             } else {
                 foodLevel -= foodNeeded * 0.25
-                println("$name couldn't find food.")
+                println("$name не смог найти еду на координатах (${location.x}, ${location.y}).")
             }
         }
     }
 
     override fun reproduce(location: Location) {
         val potentialMate = location.animals.firstOrNull { it::class == this::class && it != this } as? Predator
-        if (potentialMate != null && location.animals.size < SimulationConfig.MAX_ANIMALS_PER_CELL) {
-            val newPredator = when (this) {
-                is Wolf -> Wolf()
-                is Snake -> Snake()
-                is Fox -> Fox()
-                is Bear -> Bear()
-                is Eagle -> Eagle()
-                else -> return
+        if (potentialMate != null) {
+            val speciesCount = location.animals.count { it.name == name }
+            if (speciesCount < SimulationConfig.animalCharacteristics[name]!!.maxCount) {
+                val offspringCount = SimulationConfig.animalCharacteristics[name]!!.offspringCount
+                repeat(offspringCount) {
+                    val newPredator = when (this) {
+                        is Wolf -> Wolf()
+                        is Snake -> Snake()
+                        is Fox -> Fox()
+                        is Bear -> Bear()
+                        is Eagle -> Eagle()
+                        else -> return
+                    }
+                    location.animals.add(newPredator)
+                    newPredator.currentLocation = location
+                    println("$name размножился на координатах (${location.x}, ${location.y}). Новый ${newPredator.name} появился.")
+                }
             }
-
-            location.animals.add(newPredator)
-            println("$name reproduced. New ${newPredator.name} appeared.")
         }
     }
 
     override fun move(island: Island) {
-        val possibleMoves = island.getAdjacentLocations(island.getLocationOf(this)!!)
-        if (possibleMoves.isNotEmpty()) {
-            val newLocation = possibleMoves.random()
-            island.moveAnimal(this, island.getLocationOf(this)!!, newLocation)
+        val speed = speed.toInt()
+        var steps = Random.nextInt(1, speed + 1)
+        var currentLoc = currentLocation!!
+        while (steps > 0) {
+            val possibleMoves = island.getAdjacentLocations(currentLoc)
+            if (possibleMoves.isNotEmpty()) {
+                val newLocation = possibleMoves.random()
+                island.moveAnimal(this, currentLoc, newLocation)
+                currentLoc = newLocation
+            }
+            steps--
         }
     }
 }
@@ -191,8 +207,9 @@ abstract class Herbivore(
     weight: Double,
     maxCount: Int,
     speed: Double,
-    foodNeeded: Double
-) : Animal(name, weight, maxCount, speed, foodNeeded) {
+    foodNeeded: Double,
+    offspringCount: Int
+) : Animal(name, weight, maxCount, speed, foodNeeded, offspringCount) {
 
     override fun eat(location: Location) {
         if (foodLevel < foodNeeded) {
@@ -201,7 +218,7 @@ abstract class Herbivore(
                     val plant = location.plants.removeAt(0)
                     foodLevel = foodNeeded
                     weight += plant.weight * 0.05
-                    println("$name ate a plant.")
+                    println("$name съел растение на координатах (${location.x}, ${location.y}).")
                     return
                 }
             }
@@ -214,7 +231,7 @@ abstract class Herbivore(
                             location.animals.remove(target)
                             foodLevel = foodNeeded
                             weight += target.weight * 0.1
-                            println("$name ate a $foodName.")
+                            println("$name съел $foodName на координатах (${location.x}, ${location.y}).")
                             return
                         }
                     }
@@ -222,47 +239,62 @@ abstract class Herbivore(
             }
 
             foodLevel -= foodNeeded * 0.25
-            println("$name couldn't find food.")
+            println("$name не смог найти еду на координатах (${location.x}, ${location.y}).")
         }
     }
 
     override fun reproduce(location: Location) {
         val potentialMate = location.animals.firstOrNull { it::class == this::class && it != this } as? Herbivore
-        if (potentialMate != null && location.animals.size < SimulationConfig.MAX_ANIMALS_PER_CELL) {
-            val newHerbivore = when (this) {
-                is Horse -> Horse()
-                is Deer -> Deer()
-                is Rabbit -> Rabbit()
-                is Mouse -> Mouse()
-                is Goat -> Goat()
-                is Sheep -> Sheep()
-                is Boar -> Boar()
-                is Buffalo -> Buffalo()
-                is Duck -> Duck()
-                is Caterpillar -> Caterpillar()
-                else -> return
+        if (potentialMate != null) {
+            val speciesCount = location.animals.count { it.name == name }
+            if (speciesCount < SimulationConfig.animalCharacteristics[name]!!.maxCount) {
+                val offspringCount = SimulationConfig.animalCharacteristics[name]!!.offspringCount
+                repeat(offspringCount) {
+                    val newHerbivore = when (this) {
+                        is Horse -> Horse()
+                        is Deer -> Deer()
+                        is Rabbit -> Rabbit()
+                        is Mouse -> Mouse()
+                        is Goat -> Goat()
+                        is Sheep -> Sheep()
+                        is Boar -> Boar()
+                        is Buffalo -> Buffalo()
+                        is Duck -> Duck()
+                        is Caterpillar -> Caterpillar()
+                        else -> return
+                    }
+                    location.animals.add(newHerbivore)
+                    newHerbivore.currentLocation = location
+                    println("$name размножился на координатах (${location.x}, ${location.y}). Новый ${newHerbivore.name} появился.")
+                }
             }
-
-            location.animals.add(newHerbivore)
-            println("$name reproduced. New ${newHerbivore.name} appeared.")
         }
     }
 
     override fun move(island: Island) {
-        val possibleMoves = island.getAdjacentLocations(island.getLocationOf(this)!!)
-        if (possibleMoves.isNotEmpty()) {
-            val newLocation = possibleMoves.random()
-            island.moveAnimal(this, island.getLocationOf(this)!!, newLocation)
+        val speed = speed.toInt()
+        var steps = Random.nextInt(1, speed + 1)
+        var currentLoc = currentLocation!!
+        while (steps > 0) {
+            val possibleMoves = island.getAdjacentLocations(currentLoc)
+            if (possibleMoves.isNotEmpty()) {
+                val newLocation = possibleMoves.random()
+                island.moveAnimal(this, currentLoc, newLocation)
+                currentLoc = newLocation
+            }
+            steps--
         }
     }
 }
 
+// Конкретные классы животных (хищники)
 class Wolf : Predator(
     name = "Волк",
     weight = SimulationConfig.animalCharacteristics["Волк"]!!.weight,
     maxCount = SimulationConfig.animalCharacteristics["Волк"]!!.maxCount,
     speed = SimulationConfig.animalCharacteristics["Волк"]!!.speed,
-    foodNeeded = SimulationConfig.animalCharacteristics["Волк"]!!.foodNeeded
+    foodNeeded = SimulationConfig.animalCharacteristics["Волк"]!!.foodNeeded,
+    offspringCount = SimulationConfig.animalCharacteristics["Волк"]!!.offspringCount
 )
 
 class Snake : Predator(
@@ -270,7 +302,8 @@ class Snake : Predator(
     weight = SimulationConfig.animalCharacteristics["Удав"]!!.weight,
     maxCount = SimulationConfig.animalCharacteristics["Удав"]!!.maxCount,
     speed = SimulationConfig.animalCharacteristics["Удав"]!!.speed,
-    foodNeeded = SimulationConfig.animalCharacteristics["Удав"]!!.foodNeeded
+    foodNeeded = SimulationConfig.animalCharacteristics["Удав"]!!.foodNeeded,
+    offspringCount = SimulationConfig.animalCharacteristics["Удав"]!!.offspringCount
 )
 
 class Fox : Predator(
@@ -278,7 +311,8 @@ class Fox : Predator(
     weight = SimulationConfig.animalCharacteristics["Лиса"]!!.weight,
     maxCount = SimulationConfig.animalCharacteristics["Лиса"]!!.maxCount,
     speed = SimulationConfig.animalCharacteristics["Лиса"]!!.speed,
-    foodNeeded = SimulationConfig.animalCharacteristics["Лиса"]!!.foodNeeded
+    foodNeeded = SimulationConfig.animalCharacteristics["Лиса"]!!.foodNeeded,
+    offspringCount = SimulationConfig.animalCharacteristics["Лиса"]!!.offspringCount
 )
 
 class Bear : Predator(
@@ -286,7 +320,8 @@ class Bear : Predator(
     weight = SimulationConfig.animalCharacteristics["Медведь"]!!.weight,
     maxCount = SimulationConfig.animalCharacteristics["Медведь"]!!.maxCount,
     speed = SimulationConfig.animalCharacteristics["Медведь"]!!.speed,
-    foodNeeded = SimulationConfig.animalCharacteristics["Медведь"]!!.foodNeeded
+    foodNeeded = SimulationConfig.animalCharacteristics["Медведь"]!!.foodNeeded,
+    offspringCount = SimulationConfig.animalCharacteristics["Медведь"]!!.offspringCount
 )
 
 class Eagle : Predator(
@@ -294,15 +329,18 @@ class Eagle : Predator(
     weight = SimulationConfig.animalCharacteristics["Орел"]!!.weight,
     maxCount = SimulationConfig.animalCharacteristics["Орел"]!!.maxCount,
     speed = SimulationConfig.animalCharacteristics["Орел"]!!.speed,
-    foodNeeded = SimulationConfig.animalCharacteristics["Орел"]!!.foodNeeded
+    foodNeeded = SimulationConfig.animalCharacteristics["Орел"]!!.foodNeeded,
+    offspringCount = SimulationConfig.animalCharacteristics["Орел"]!!.offspringCount
 )
 
+// Конкретные классы животных (травоядные)
 class Horse : Herbivore(
     name = "Лошадь",
     weight = SimulationConfig.animalCharacteristics["Лошадь"]!!.weight,
     maxCount = SimulationConfig.animalCharacteristics["Лошадь"]!!.maxCount,
     speed = SimulationConfig.animalCharacteristics["Лошадь"]!!.speed,
-    foodNeeded = SimulationConfig.animalCharacteristics["Лошадь"]!!.foodNeeded
+    foodNeeded = SimulationConfig.animalCharacteristics["Лошадь"]!!.foodNeeded,
+    offspringCount = SimulationConfig.animalCharacteristics["Лошадь"]!!.offspringCount
 )
 
 class Deer : Herbivore(
@@ -310,7 +348,8 @@ class Deer : Herbivore(
     weight = SimulationConfig.animalCharacteristics["Олень"]!!.weight,
     maxCount = SimulationConfig.animalCharacteristics["Олень"]!!.maxCount,
     speed = SimulationConfig.animalCharacteristics["Олень"]!!.speed,
-    foodNeeded = SimulationConfig.animalCharacteristics["Олень"]!!.foodNeeded
+    foodNeeded = SimulationConfig.animalCharacteristics["Олень"]!!.foodNeeded,
+    offspringCount = SimulationConfig.animalCharacteristics["Олень"]!!.offspringCount
 )
 
 class Rabbit : Herbivore(
@@ -318,7 +357,8 @@ class Rabbit : Herbivore(
     weight = SimulationConfig.animalCharacteristics["Кролик"]!!.weight,
     maxCount = SimulationConfig.animalCharacteristics["Кролик"]!!.maxCount,
     speed = SimulationConfig.animalCharacteristics["Кролик"]!!.speed,
-    foodNeeded = SimulationConfig.animalCharacteristics["Кролик"]!!.foodNeeded
+    foodNeeded = SimulationConfig.animalCharacteristics["Кролик"]!!.foodNeeded,
+    offspringCount = SimulationConfig.animalCharacteristics["Кролик"]!!.offspringCount
 )
 
 class Mouse : Herbivore(
@@ -326,7 +366,8 @@ class Mouse : Herbivore(
     weight = SimulationConfig.animalCharacteristics["Мышь"]!!.weight,
     maxCount = SimulationConfig.animalCharacteristics["Мышь"]!!.maxCount,
     speed = SimulationConfig.animalCharacteristics["Мышь"]!!.speed,
-    foodNeeded = SimulationConfig.animalCharacteristics["Мышь"]!!.foodNeeded
+    foodNeeded = SimulationConfig.animalCharacteristics["Мышь"]!!.foodNeeded,
+    offspringCount = SimulationConfig.animalCharacteristics["Мышь"]!!.offspringCount
 )
 
 class Goat : Herbivore(
@@ -334,7 +375,8 @@ class Goat : Herbivore(
     weight = SimulationConfig.animalCharacteristics["Коза"]!!.weight,
     maxCount = SimulationConfig.animalCharacteristics["Коза"]!!.maxCount,
     speed = SimulationConfig.animalCharacteristics["Коза"]!!.speed,
-    foodNeeded = SimulationConfig.animalCharacteristics["Коза"]!!.foodNeeded
+    foodNeeded = SimulationConfig.animalCharacteristics["Коза"]!!.foodNeeded,
+    offspringCount = SimulationConfig.animalCharacteristics["Коза"]!!.offspringCount
 )
 
 class Sheep : Herbivore(
@@ -342,7 +384,8 @@ class Sheep : Herbivore(
     weight = SimulationConfig.animalCharacteristics["Овца"]!!.weight,
     maxCount = SimulationConfig.animalCharacteristics["Овца"]!!.maxCount,
     speed = SimulationConfig.animalCharacteristics["Овца"]!!.speed,
-    foodNeeded = SimulationConfig.animalCharacteristics["Овца"]!!.foodNeeded
+    foodNeeded = SimulationConfig.animalCharacteristics["Овца"]!!.foodNeeded,
+    offspringCount = SimulationConfig.animalCharacteristics["Овца"]!!.offspringCount
 )
 
 class Boar : Herbivore(
@@ -350,7 +393,8 @@ class Boar : Herbivore(
     weight = SimulationConfig.animalCharacteristics["Кабан"]!!.weight,
     maxCount = SimulationConfig.animalCharacteristics["Кабан"]!!.maxCount,
     speed = SimulationConfig.animalCharacteristics["Кабан"]!!.speed,
-    foodNeeded = SimulationConfig.animalCharacteristics["Кабан"]!!.foodNeeded
+    foodNeeded = SimulationConfig.animalCharacteristics["Кабан"]!!.foodNeeded,
+    offspringCount = SimulationConfig.animalCharacteristics["Кабан"]!!.offspringCount
 )
 
 class Buffalo : Herbivore(
@@ -358,7 +402,8 @@ class Buffalo : Herbivore(
     weight = SimulationConfig.animalCharacteristics["Буйвол"]!!.weight,
     maxCount = SimulationConfig.animalCharacteristics["Буйвол"]!!.maxCount,
     speed = SimulationConfig.animalCharacteristics["Буйвол"]!!.speed,
-    foodNeeded = SimulationConfig.animalCharacteristics["Буйвол"]!!.foodNeeded
+    foodNeeded = SimulationConfig.animalCharacteristics["Буйвол"]!!.foodNeeded,
+    offspringCount = SimulationConfig.animalCharacteristics["Буйвол"]!!.offspringCount
 )
 
 class Duck : Herbivore(
@@ -366,7 +411,8 @@ class Duck : Herbivore(
     weight = SimulationConfig.animalCharacteristics["Утка"]!!.weight,
     maxCount = SimulationConfig.animalCharacteristics["Утка"]!!.maxCount,
     speed = SimulationConfig.animalCharacteristics["Утка"]!!.speed,
-    foodNeeded = SimulationConfig.animalCharacteristics["Утка"]!!.foodNeeded
+    foodNeeded = SimulationConfig.animalCharacteristics["Утка"]!!.foodNeeded,
+    offspringCount = SimulationConfig.animalCharacteristics["Утка"]!!.offspringCount
 )
 
 class Caterpillar : Herbivore(
@@ -374,7 +420,8 @@ class Caterpillar : Herbivore(
     weight = SimulationConfig.animalCharacteristics["Гусеница"]!!.weight,
     maxCount = SimulationConfig.animalCharacteristics["Гусеница"]!!.maxCount,
     speed = SimulationConfig.animalCharacteristics["Гусеница"]!!.speed,
-    foodNeeded = SimulationConfig.animalCharacteristics["Гусеница"]!!.foodNeeded
+    foodNeeded = SimulationConfig.animalCharacteristics["Гусеница"]!!.foodNeeded,
+    offspringCount = SimulationConfig.animalCharacteristics["Гусеница"]!!.offspringCount
 )
 
 data class Location(val x: Int, val y: Int) {
@@ -428,8 +475,10 @@ class Island(val width: Int, val height: Int) {
             val x = Random.nextInt(0, width)
             val y = Random.nextInt(0, height)
             val location = grid[x][y]
-            if (location.animals.size < SimulationConfig.MAX_ANIMALS_PER_CELL) {
+            val speciesCount = location.animals.count { it.name == animal.name }
+            if (speciesCount < SimulationConfig.animalCharacteristics[animal.name]!!.maxCount) {
                 location.animals.add(animal)
+                animal.currentLocation = location
                 placed = true
             }
         }
@@ -443,17 +492,6 @@ class Island(val width: Int, val height: Int) {
 
     fun removeAnimal(animal: Animal, location: Location) {
         location.animals.remove(animal)
-    }
-
-    fun getLocationOf(animal: Animal): Location? {
-        grid.forEach { row ->
-            row.forEach { location ->
-                if (location.animals.contains(animal)) {
-                    return location
-                }
-            }
-        }
-        return null
     }
 
     fun getAdjacentLocations(location: Location): List<Location> {
@@ -470,16 +508,22 @@ class Island(val width: Int, val height: Int) {
     }
 
     fun moveAnimal(animal: Animal, oldLocation: Location, newLocation: Location) {
-        if (oldLocation.animals.contains(animal) && newLocation.animals.size < SimulationConfig.MAX_ANIMALS_PER_CELL) {
+        val speciesCount = newLocation.animals.count { it.name == animal.name }
+        if (oldLocation.animals.contains(animal) && speciesCount < SimulationConfig.animalCharacteristics[animal.name]!!.maxCount) {
             oldLocation.animals.remove(animal)
             newLocation.animals.add(animal)
+            animal.currentLocation = newLocation
         }
+    }
+
+    fun getTotalAnimalCount(): Int {
+        return grid.sumOf { row -> row.sumOf { it.animals.size } }
     }
 }
 
 object Simulation {
     private val island = Island(SimulationConfig.ISLAND_WIDTH, SimulationConfig.ISLAND_HEIGHT)
-    private val scheduledExecutor = Executors.newScheduledThreadPool(3)
+    private val scheduledExecutor = Executors.newScheduledThreadPool(2)
     private val animalExecutor = Executors.newFixedThreadPool(10)
 
     fun start() {
@@ -493,26 +537,19 @@ object Simulation {
         scheduledExecutor.scheduleAtFixedRate({
             animalLifecycle()
         }, 0, SimulationConfig.TICK_INTERVAL_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
-
-        scheduledExecutor.scheduleAtFixedRate({
-            printStatistics()
-        }, 0, SimulationConfig.STATISTICS_INTERVAL_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
-
-        scheduledExecutor.schedule({
-            stop()
-        }, SimulationConfig.SIMULATION_DURATION_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
     }
 
     private fun growPlants() {
         island.grid.forEach { row ->
             row.forEach { location ->
                 if (location.plants.size < SimulationConfig.MAX_PLANTS_PER_CELL) {
-                    val growthFactor = 0.1 + Random.nextDouble() * 0.1
-                    val newPlants = (SimulationConfig.MAX_PLANTS_PER_CELL * growthFactor).toInt()
-                    repeat(newPlants) {
-                        island.addPlant(location)
+                    if (Random.nextDouble() < 0.1) {
+                        val newPlants = Random.nextInt(1, 6)
+                        repeat(newPlants) {
+                            island.addPlant(location)
+                        }
+                        println("Растения выросли на координатах (${location.x}, ${location.y}). Новое количество: ${location.plants.size}")
                     }
-                    println("Plants grew at location ${location.x}, ${location.y}. New count: ${location.plants.size}")
                 }
             }
         }
@@ -536,12 +573,18 @@ object Simulation {
                             if (animal.foodLevel <= 0) {
                                 animal.die()
                                 location.animals.remove(animal)
-                                println("${animal.name} starved to death.")
+                                println("${animal.name} умер от голода на координатах (${location.x}, ${location.y}).")
                             }
                         }
                     }
                 }
             }
+        }
+
+        printStatistics()
+
+        if (island.getTotalAnimalCount() == 0) {
+            stop()
         }
     }
 
@@ -558,8 +601,8 @@ object Simulation {
             }
         }
 
-        println("-------------------- STATISTICS --------------------")
-        println("Total Animals: $totalAnimals")
+        println("-------------------- СТАТИСТИКА --------------------")
+        println("Всего животных: $totalAnimals")
         animalCounts.forEach { (name, count) ->
             println("$name: $count")
         }
@@ -570,7 +613,7 @@ object Simulation {
                 totalPlants += location.plants.size
             }
         }
-        println("Total Plants: $totalPlants")
+        println("Всего растений: $totalPlants")
         println("----------------------------------------------------")
     }
 
@@ -578,7 +621,7 @@ object Simulation {
         SimulationConfig.IS_SIMULATION_RUNNING = false
         scheduledExecutor.shutdown()
         animalExecutor.shutdown()
-        println("Simulation stopped.")
+        println("Симуляция остановлена.")
     }
 }
 
