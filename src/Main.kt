@@ -8,23 +8,23 @@ object SimulationConfig {
     const val TICK_INTERVAL_MS = 1000L
     const val INITIAL_PLANT_DENSITY = 0.3
 
-    const val INITIAL_WOLF_COUNT = 5
-    const val INITIAL_SNAKE_COUNT = 5
-    const val INITIAL_FOX_COUNT = 5
-    const val INITIAL_BEAR_COUNT = 2
-    const val INITIAL_EAGLE_COUNT = 5
+    const val INITIAL_WOLF_COUNT = 25
+    const val INITIAL_SNAKE_COUNT = 25
+    const val INITIAL_FOX_COUNT = 25
+    const val INITIAL_BEAR_COUNT = 10
+    const val INITIAL_EAGLE_COUNT = 25
     const val INITIAL_HORSE_COUNT = 10
     const val INITIAL_DEER_COUNT = 10
     const val INITIAL_RABBIT_COUNT = 50
     const val INITIAL_MOUSE_COUNT = 100
     const val INITIAL_GOAT_COUNT = 20
     const val INITIAL_SHEEP_COUNT = 20
-    const val INITIAL_BOAR_COUNT = 15
-    const val INITIAL_BUFFALO_COUNT = 5
-    const val INITIAL_DUCK_COUNT = 30
-    const val INITIAL_CATERPILLAR_COUNT = 200
+    const val INITIAL_BOAR_COUNT = 30
+    const val INITIAL_BUFFALO_COUNT = 30
+    const val INITIAL_DUCK_COUNT = 20
+    const val INITIAL_CATERPILLAR_COUNT = 100
 
-    const val MAX_PLANTS_PER_CELL = 200
+    const val MAX_PLANTS_PER_CELL = 50
 
     var IS_SIMULATION_RUNNING = true
 
@@ -44,7 +44,7 @@ object SimulationConfig {
         "Буйвол" to AnimalCharacteristics(700.0, 10, 3.0, 100.0, 1),
         "Утка" to AnimalCharacteristics(1.0, 200, 4.0, 0.15, 2),
         "Гусеница" to AnimalCharacteristics(0.01, 1000, 0.0, 0.0, 10),
-        "Растения" to AnimalCharacteristics(1.0, 200, 0.0, 0.0, 0)
+        "Растения" to AnimalCharacteristics(1.0, 50, 0.0, 0.0, 0)
     )
 
     val foodProbabilities = mapOf(
@@ -140,22 +140,20 @@ abstract class Predator(
         if (foodLevel < foodNeeded) {
             val availableFood = location.animals.filter { it != this && it.isAlive }
             if (availableFood.isNotEmpty()) {
-                val target = availableFood.firstOrNull {
-                    val probability = SimulationConfig.foodProbabilities[name]?.get(it.name) ?: 0
-                    Random.nextInt(0, 100) < probability
-                }
-
-                if (target != null) {
-                    if (target.beEaten()) {
-                        location.animals.remove(target)
-                        foodLevel = foodNeeded
-                        weight += target.weight * 0.1
-                        println("$name съел ${target.name} на координатах (${location.x}, ${location.y}).")
+                for (potentialTarget in availableFood) {
+                    val probability = SimulationConfig.foodProbabilities[name]?.get(potentialTarget.name) ?: 0
+                    if (Random.nextInt(0, 50) < probability) {
+                        if (potentialTarget.beEaten()) {
+                            location.animals.remove(potentialTarget)
+                            foodLevel = foodNeeded
+                            weight += potentialTarget.weight * 0.1
+                            println("$name съел ${potentialTarget.name} на координатах (${location.x}, ${location.y}).")
+                            return
+                        }
                     }
-                } else {
-                    foodLevel -= foodNeeded * 0.25
-                    println("$name не смог найти еду на координатах (${location.x}, ${location.y}).")
                 }
+                foodLevel -= foodNeeded * 0.25
+                println("$name не смог найти еду на координатах (${location.x}, ${location.y}).")
             } else {
                 foodLevel -= foodNeeded * 0.25
                 println("$name не смог найти еду на координатах (${location.x}, ${location.y}).")
@@ -190,12 +188,17 @@ abstract class Predator(
         val speed = speed.toInt()
         var steps = Random.nextInt(1, speed + 1)
         var currentLoc = currentLocation!!
+
         while (steps > 0) {
             val possibleMoves = island.getAdjacentLocations(currentLoc)
             if (possibleMoves.isNotEmpty()) {
-                val newLocation = possibleMoves.random()
-                island.moveAnimal(this, currentLoc, newLocation)
-                currentLoc = newLocation
+                val bestMove = possibleMoves.maxByOrNull { loc ->
+                    loc.animals.count { animal ->
+                        SimulationConfig.foodProbabilities[name]?.containsKey(animal.name) == true
+                    } * 2 + loc.animals.size
+                } ?: possibleMoves.random()
+                island.moveAnimal(this, currentLoc, bestMove)
+                currentLoc = bestMove
             }
             steps--
         }
@@ -275,12 +278,13 @@ abstract class Herbivore(
         val speed = speed.toInt()
         var steps = Random.nextInt(1, speed + 1)
         var currentLoc = currentLocation!!
+
         while (steps > 0) {
             val possibleMoves = island.getAdjacentLocations(currentLoc)
             if (possibleMoves.isNotEmpty()) {
-                val newLocation = possibleMoves.random()
-                island.moveAnimal(this, currentLoc, newLocation)
-                currentLoc = newLocation
+                val bestMove = possibleMoves.maxByOrNull { it.plants.size } ?: possibleMoves.random()
+                island.moveAnimal(this, currentLoc, bestMove)
+                currentLoc = bestMove
             }
             steps--
         }
@@ -543,8 +547,8 @@ object Simulation {
         island.grid.forEach { row ->
             row.forEach { location ->
                 if (location.plants.size < SimulationConfig.MAX_PLANTS_PER_CELL) {
-                    if (Random.nextDouble() < 0.1) {
-                        val newPlants = Random.nextInt(1, 6)
+                    if (Random.nextDouble() < 0.015) {
+                        val newPlants = Random.nextInt(1, 3)
                         repeat(newPlants) {
                             island.addPlant(location)
                         }
