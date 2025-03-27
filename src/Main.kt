@@ -71,7 +71,7 @@ data class AnimalCharacteristics(
     val maxCount: Int,
     val speed: Double,
     val foodNeeded: Double,
-    val offspringCount: Int // Количество детёнышей при размножении
+    val offspringCount: Int
 )
 
 interface Eatable {
@@ -291,7 +291,6 @@ abstract class Herbivore(
     }
 }
 
-// Конкретные классы животных (хищники)
 class Wolf : Predator(
     name = "Волк",
     weight = SimulationConfig.animalCharacteristics["Волк"]!!.weight,
@@ -337,7 +336,6 @@ class Eagle : Predator(
     offspringCount = SimulationConfig.animalCharacteristics["Орел"]!!.offspringCount
 )
 
-// Конкретные классы животных (травоядные)
 class Horse : Herbivore(
     name = "Лошадь",
     weight = SimulationConfig.animalCharacteristics["Лошадь"]!!.weight,
